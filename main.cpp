@@ -2,8 +2,10 @@
 #include <string>
 #include <iostream>
 #define HASH    997
-#define AP_THRESHOLD_P1 50
-#define AP_THRESHOLD_P2 50
+#define AP_THRESHOLD_P1 200
+#define AP_THRESHOLD_P2 90
+#define IP_THRESHOLD    0.8
+#define SCORE_THRESHOLD 1.05
 using namespace std;
 
 ifstream fin("data.csv");
@@ -97,7 +99,9 @@ class user_struct{
         p = p->next;
         p->brand_id = b;
         if (t!=-1) p->count[t]++;
-        if (t==-1) p->decide = 1;
+        if (t==-1) {
+            p->decide = 1;
+        }
         brand_sum++;
         return;
     }
@@ -118,22 +122,34 @@ class user_struct{
         node *p;
         p = list;
         int tmp1,tmp2;
+        double id1_s,id2_s;
         tmp1 = tmp2 = 1;
         while (p->next!=NULL){
             p = p->next;
             if (p->brand_id == id1){
                 tmp1 = 0;
-                if ((p->decide == 0)) return;
+                id1_s = p->score;
+                if ((tmp2 == 0) && (id2_s>=IP_THRESHOLD)) p->decide = 1;
             }
             if (p->brand_id == id2){
                 tmp2 = 0;
-                if ((p->decide == 0)) return;
+                id2_s = p->score;
+                if ((tmp1 == 0) && (id1_s>=IP_THRESHOLD)) p->decide = 1;
             }
         }
         if ((tmp1+tmp2)!=1) return;
-        if (tmp1==1) insert_action(id1,-1);
-        if (tmp2==1) insert_action(id2,-1);
-        return;
+        int tmp;
+        if (tmp1==1){
+            if (id2_s<IP_THRESHOLD) return;
+            tmp = id1;
+        }
+        else{
+            if (id1_s<IP_THRESHOLD) return;
+            tmp = id2;
+        }
+        p->next = new node;
+        p->brand_id = tmp;
+        p->decide = 1;
     }
 
     //get info about the d-th brand related to the user
@@ -160,7 +176,7 @@ class user_struct{
             p = p->next;
             k = p->count[2]+p->count[3];
             p->score = p->count[0]*p->scale;
-            if ((p->score>=1)|| (p->count[1]>1)  || ((k>0)&&(p->count[1] == 0)&&(p->score>0.5))  ) {
+            if ((p->score>=SCORE_THRESHOLD)|| (p->count[1]>1)  || ((k>0)&&(p->count[1] == 0)&&(p->score>SCORE_THRESHOLD/2))  ) {
                 p->decide = 1;
             }
             else
@@ -173,9 +189,13 @@ class user_struct{
         p = list;
         bool tmp = 1;
         int k = 0;
+        int i = 0;
         while (p->next!=NULL){
             p = p->next;
-            if (p->decide){
+            if (p->brand_id == 21110){
+                i = 1;
+            }
+            if (p->decide == 1){
                 if (tmp == 1){
                     tmp = 0;
                     fout<<user_id<<"\t";
@@ -308,6 +328,8 @@ void frequent(){
         }
     }
 
+    cout<<"total frequent pair: "<<pairs_num<<endl;
+
     for (i=0; i<pairs_num; i++){
         for (j=0; j<user_num; j++){
             user[j].insert_pair(pairs[i].id1, pairs[i].id2);
@@ -346,10 +368,6 @@ void output_frequent_count(){
 void output_user_count(){
     int i,j,k;
 
-    for (i=0;i<user_num;i++){
-        user[i].make_decide();
-    }
-
     i = 0;
     k = 0;
     while (i<user_num){
@@ -357,6 +375,7 @@ void output_user_count(){
         i++;
     }
     cout<<k<<endl;
+    cin>>k;
 }
 
 void first_decide(){
@@ -408,7 +427,7 @@ int main(){
     log_num = input_log();
     define_new_id();
     first_decide();
-    //frequent();
+    frequent();
     //output_frequent_count();
     //output_brand_count();
     output_user_count();

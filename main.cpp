@@ -1,22 +1,29 @@
 #include <fstream>
 #include <string>
 #include <iostream>
+#include <math.h>
 #define HASH    997
 #define AP_THRESHOLD_P1 200
 #define AP_THRESHOLD_P2 90
 #define IP_THRESHOLD    0.8
 #define SCORE_THRESHOLD 1.05
+#define DIS_FACTOR 0.042
+#define STD_FACTOR  0.42
 using namespace std;
 
 ifstream fin("data.csv");
 ofstream fout("result.txt");
 
-class action_log{
+class action_logg{
 public:
 	int user_id;
 	int month, day;
 	int action_type;
 	int brand_id;
+};
+
+struct vector{
+    double count[4];
 };
 
 class hash_struct{
@@ -62,18 +69,20 @@ class user_struct{
     public:
     int user_id;
     int brand_sum;
+    int action_num;
+    vector standard;
     struct node{
         int brand_id;
         int count[4];
         double score;
-        double scale;
+        vector scale;
         bool decide;
         node *next;
         node(){
             next = NULL;
             count[0] = count[1] = count[2] = count[3] = 0;
             score = 0;
-            scale = 0;
+            scale.count[0] = scale.count[1] =scale.count[2] =scale.count[3] =0;
             decide = 0;
         }
     };
@@ -83,11 +92,14 @@ class user_struct{
     user_struct(){
         list = new node;
         brand_sum = 0;
+        action_num = 0;
+        standard.count[0] = standard.count[1] = standard.count[2] = standard.count[3];
     }
 
     void insert_action(int b,int t){
         node *p;
         p = list;
+        action_num++;
         while (p->next!=NULL){
             p = p->next;
             if (p->brand_id==b){
@@ -98,15 +110,12 @@ class user_struct{
         p->next = new node;
         p = p->next;
         p->brand_id = b;
-        if (t!=-1) p->count[t]++;
-        if (t==-1) {
-            p->decide = 1;
-        }
+        p->count[t]++;
         brand_sum++;
         return;
     }
 
-    void insert_scale(int b,double s){
+    void insert_scale(int b,vector s){
         node *p;
         p = list;
         while (p->next!=NULL){
@@ -150,6 +159,7 @@ class user_struct{
         p->next = new node;
         p->brand_id = tmp;
         p->decide = 1;
+        brand_sum++;
     }
 
     //get info about the d-th brand related to the user
@@ -168,19 +178,82 @@ class user_struct{
         return p->count[t];
     }
 
+    vector brand_vector(int b){
+        node *p;
+        p = list;
+        int i,j,k;
+        vector s;
+        s.count[0] = s.count[1] = s.count[2] = s.count[3] = 0;
+        while (p->next!=NULL){
+            p = p->next;
+            if (p->brand_id == b){
+                for (i=0;i<4;i++) s.count[i] = p->count[i];
+                return s;
+            }
+        }
+        return s;
+    }
+
+    void make_standard(){
+        node *p;
+        p = list;
+        int i,j,k = 0;
+        double tmp;
+        while (p->next!=NULL){
+            p = p->next;
+            if (p->count[1]>0){
+                for (i=0;i<4;i++) standard.count[i] = standard.count[i] + p->count[i];
+                k = k + 1;
+            }
+        }
+        tmp = standard.count[1];
+        for (i=0;i<4;i++) standard.count[i] = (standard.count[i]) / tmp;
+    }
+
     void make_decide(){
         int i,j,k;
+        double dis,tmp;
         node *p;
         p = list;
         while (p->next!=NULL){
             p = p->next;
-            k = p->count[2]+p->count[3];
-            p->score = p->count[0]*p->scale;
-            if ((p->score>=SCORE_THRESHOLD)|| (p->count[1]>1)  || ((k>0)&&(p->count[1] == 0)&&(p->score>SCORE_THRESHOLD/2))  ) {
+            if (p->count[1]>1){
                 p->decide = 1;
+                continue;
             }
-            else
-                p->decide = 0;
+            j = k = 0;
+            for (i=0;i<4;i++){
+                if (i==1) continue;
+                if (standard.count[i]<=p->count[i]*STD_FACTOR) k++;
+                if (p->scale.count[i]<=p->count[i]*STD_FACTOR) j++;
+            }
+            if ((k==3)||(j==3)){
+                p->decide = 1;
+                continue;
+            }
+            dis = tmp = 0;
+            for (i=0;i<4;i++){
+                if (i==1) continue;
+                dis = dis + (p->count[i]- standard.count[i]) * (p->count[i]- standard.count[i]);
+                tmp = tmp + standard.count[i]*standard.count[i];
+            }
+            dis = sqrt(dis); tmp = sqrt(tmp);
+            if (dis<tmp * DIS_FACTOR){
+                p->decide = 1;
+                continue;
+            }
+            dis = tmp = 0;
+            for (i=0;i<4;i++){
+                if (i==1) continue;
+                dis = dis + (p->count[i]- p->scale.count[i]) * (p->count[i]- p->scale.count[i]);
+                tmp = tmp + p->scale.count[i]*p->scale.count[i];
+            }
+            dis = sqrt(dis); tmp = sqrt(tmp);
+            if (dis<tmp * DIS_FACTOR){
+                p->decide = 1;
+                continue;
+            }
+            p->decide = 0;
         }
     }
 
@@ -189,12 +262,8 @@ class user_struct{
         p = list;
         bool tmp = 1;
         int k = 0;
-        int i = 0;
         while (p->next!=NULL){
             p = p->next;
-            if (p->brand_id == 21110){
-                i = 1;
-            }
             if (p->decide == 1){
                 if (tmp == 1){
                     tmp = 0;
@@ -250,44 +319,62 @@ int items_num = 0, pairs_num = 0;
 frequent_item items[3000];
 frequent_pair pairs[10000];
 
-int log_num = 0, brand_num = 0, user_num = 0;
+int logg_num = 0, brand_num = 0, user_num = 0;
 hash_struct brand_hash[HASH];
 hash_struct user_hash[HASH];
 brand_struct brand[10000];
 user_struct user[10000];
-action_log *log = new action_log[200000];
+action_logg *logg = new action_logg[200000];
 
 void define_new_id(){
     int i,j,k;
     i = 0;
-    while (i<log_num){
+    while (i<logg_num){
 
-        k = log[i].brand_id;
+        k = logg[i].brand_id;
         k = brand_hash[k%HASH].check(k,brand_num);
         if (k == -1)brand_num++;
-        k = log[i].brand_id;
+        k = logg[i].brand_id;
         k = brand_hash[k%HASH].check(k,brand_num);
-        brand[k].count[log[i].action_type]++;
-        brand[k].brand_id = log[i].brand_id;
+        brand[k].count[logg[i].action_type]++;
+        brand[k].brand_id = logg[i].brand_id;
 
-        k = log[i].user_id;
+        k = logg[i].user_id;
         k = user_hash[k%HASH].check(k,user_num);
         if (k == -1) user_num++;
-        k = log[i].user_id;
+        k = logg[i].user_id;
         k = user_hash[k%HASH].check(k,user_num);
-        user[k].user_id = log[i].user_id;
-        user[k].insert_action(log[i].brand_id,log[i].action_type);
+        user[k].user_id = logg[i].user_id;
+        user[k].insert_action(logg[i].brand_id,logg[i].action_type);
         i++;
     }
+}
 
-    double s;
+void scale(){
+    vector s,t;
+    int i,j,k;
+    double tmp;
     for (i=0;i<brand_num;i++){
-        s = 1;
-        if (brand[i].count[0]!=0)
-            s = double(brand[i].count[1]) / double(brand[i].count[0]);
+        k = 0;
+        for (j=0;j<user_num;j++){
+            t = user[j].brand_vector(brand[i].brand_id);
+            if (t.count[1]>0){
+                k++;
+                s.count[0] = s.count[0] + t.count[0];
+                s.count[1] = s.count[1] + t.count[1];
+                s.count[2] = s.count[2] + t.count[2];
+                s.count[3] = s.count[3] + t.count[3];
+            }
+        }
+        tmp = s.count[1];
+        for (j=0;j<4;j++) s.count[j] = (double(s.count[j])) / tmp;
         for (j=0;j<user_num;j++){
             user[j].insert_scale(brand[i].brand_id,s);
         }
+    }
+
+    for (i=0;i<user_num;i++){
+        user[i].make_standard();
     }
 }
 
@@ -337,7 +424,25 @@ void frequent(){
     }
 
 }
-
+void output_user_logg(){
+    int i,j,k;
+    double s = 0;
+    fout<<user_num<<endl;
+    for (i=0;i<user_num;i++){
+        //fout<<i<<" "<<user[i].action_num<<endl;
+        s = s*i+user[i].action_num;
+        s = s/(i+1);
+    };
+    k = 0;
+    for (i=0;i<user_num;i++){
+        if (user[i].action_num>s){
+            fout<<i<<" "<<user[i].action_num<<endl;
+            k++;
+        }
+    }
+    fout<<k<<endl;
+    fout<<s;
+}
 void output_brand_count(){
     int i,j,k;
     int sum = 0;
@@ -386,7 +491,7 @@ void first_decide(){
     }
 }
 
-int input_log(){
+int input_logg(){
     string s;
 	fin >> s;
 	int num = 0;
@@ -400,7 +505,7 @@ int input_log(){
 			}
 			else break;
 		}
-		log[num].user_id = j;
+		logg[num].user_id = j;
 		j = 0;
 		for (i = i + 1; i < s.length(); i++){
 			if (s[i] != ','){
@@ -408,14 +513,14 @@ int input_log(){
 			}
 			else break;
 		}
-		log[num].brand_id = j;
+		logg[num].brand_id = j;
 		j = 0;
-		log[num].action_type = s[i + 1] - '0';
-		log[num].month = s[i + 3] - '0';
-		log[num].day = s[i + 6] - '0';
+		logg[num].action_type = s[i + 1] - '0';
+		logg[num].month = s[i + 3] - '0';
+		logg[num].day = s[i + 6] - '0';
 		if (s[i + 7] >= '0' && s[i + 7] <= '9'){
-			log[num].day *= 10;
-			log[num].day += s[i + 7] - '0';
+			logg[num].day *= 10;
+			logg[num].day += s[i + 7] - '0';
 		}
 		num++;
 	}
@@ -424,12 +529,14 @@ int input_log(){
 }
 
 int main(){
-    log_num = input_log();
+    logg_num = input_logg();
     define_new_id();
+    scale();
     first_decide();
-    frequent();
+    //frequent();
     //output_frequent_count();
     //output_brand_count();
     output_user_count();
+    //output_user_logg();
 	return 0;
 }

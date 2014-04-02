@@ -3,12 +3,13 @@
 #include <iostream>
 #include <math.h>
 #define HASH    997
-#define AP_THRESHOLD_P1 200
-#define AP_THRESHOLD_P2 90
+#define AP_THRESHOLD_P1 10
+#define AP_THRESHOLD_P2 3
 #define IP_THRESHOLD    0.8
-#define SCORE_THRESHOLD 1.05
-#define DIS_FACTOR 0.042
-#define STD_FACTOR  0.42
+#define BOUGHT  1
+#define STD_USER_FACTOR  0.9
+#define STD_BRAND_FACTOR    1.5
+#define DIS_FACTOR 0.1
 using namespace std;
 
 ifstream fin("data.csv");
@@ -23,7 +24,7 @@ public:
 };
 
 struct vector{
-    double count[4];
+    double count[5];
 };
 
 class hash_struct{
@@ -59,9 +60,11 @@ class brand_struct{
     public:
     int count[4];
     int brand_id;
+    int sum;
 
     brand_struct(){
         count[0] = count[1] = count[2] = count[3] = 0;
+        sum = 0;
     }
 };
 
@@ -74,14 +77,12 @@ class user_struct{
     struct node{
         int brand_id;
         int count[4];
-        double score;
         vector scale;
         bool decide;
         node *next;
         node(){
             next = NULL;
             count[0] = count[1] = count[2] = count[3] = 0;
-            score = 0;
             scale.count[0] = scale.count[1] =scale.count[2] =scale.count[3] =0;
             decide = 0;
         }
@@ -128,38 +129,21 @@ class user_struct{
     }
 
     void insert_pair(int id1,int id2){
-        node *p;
+        node *p,*q;
         p = list;
-        int tmp1,tmp2;
-        double id1_s,id2_s;
-        tmp1 = tmp2 = 1;
+        q = list;
         while (p->next!=NULL){
             p = p->next;
-            if (p->brand_id == id1){
-                tmp1 = 0;
-                id1_s = p->score;
-                if ((tmp2 == 0) && (id2_s>=IP_THRESHOLD)) p->decide = 1;
-            }
-            if (p->brand_id == id2){
-                tmp2 = 0;
-                id2_s = p->score;
-                if ((tmp1 == 0) && (id1_s>=IP_THRESHOLD)) p->decide = 1;
-            }
+            if (p->brand_id == id1) break;
         }
-        if ((tmp1+tmp2)!=1) return;
-        int tmp;
-        if (tmp1==1){
-            if (id2_s<IP_THRESHOLD) return;
-            tmp = id1;
+        while (q->next!=NULL){
+            q = q->next;
+            if (q->brand_id == id2) break;
         }
-        else{
-            if (id1_s<IP_THRESHOLD) return;
-            tmp = id2;
-        }
-        p->next = new node;
-        p->brand_id = tmp;
-        p->decide = 1;
-        brand_sum++;
+        if (!((p->brand_id==id1)&&(q->brand_id==id2))) return;
+        if ((p->count[1]==0)&&(q->count[1]==0)) return;
+        if ((p->decide==1) || (p->count[1]>0)) q->decide = 1;
+        if ((q->decide==1) || (q->count[1]>0)) p->decide = 1;
     }
 
     //get info about the d-th brand related to the user
@@ -194,20 +178,37 @@ class user_struct{
         return s;
     }
 
+    bool check_bought(int b){
+        node *p;
+        p = list;
+        while (p->next!=NULL){
+            p = p->next;
+            if (p->brand_id == b){
+                if (p->count[1] > 0) return 1;
+                            else    return 0;
+            }
+        }
+        return 0;
+    }
+
     void make_standard(){
         node *p;
         p = list;
         int i,j,k = 0;
         double tmp;
+        for (i=0;i<4;i++) standard.count[i] = 0;
         while (p->next!=NULL){
             p = p->next;
+            /*
             if (p->count[1]>0){
                 for (i=0;i<4;i++) standard.count[i] = standard.count[i] + p->count[i];
                 k = k + 1;
             }
+            */
+            for (i=0;i<4;i++) standard.count[i] = standard.count[i] + p->count[i];
         }
         tmp = standard.count[1];
-        for (i=0;i<4;i++) standard.count[i] = (standard.count[i]) / tmp;
+        if (tmp!=0) for (i=0;i<4;i++) standard.count[i] = (standard.count[i]) / tmp;
     }
 
     void make_decide(){
@@ -217,42 +218,53 @@ class user_struct{
         p = list;
         while (p->next!=NULL){
             p = p->next;
-            if (p->count[1]>1){
+            if (p->count[1]>BOUGHT){
                 p->decide = 1;
                 continue;
             }
+            if (p->scale.count[0]==p->scale.count[4]){
+                p->decide = 0;
+                continue;
+            }
+            //*
             j = k = 0;
             for (i=0;i<4;i++){
                 if (i==1) continue;
-                if (standard.count[i]<=p->count[i]*STD_FACTOR) k++;
-                if (p->scale.count[i]<=p->count[i]*STD_FACTOR) j++;
+                if (standard.count[i]<=(p->count[i]+0.01)*STD_USER_FACTOR) k++;
+                if (p->scale.count[i]<=(p->count[i]+0.01)*STD_BRAND_FACTOR) j++;
             }
             if ((k==3)||(j==3)){
                 p->decide = 1;
                 continue;
             }
-            dis = tmp = 0;
-            for (i=0;i<4;i++){
-                if (i==1) continue;
-                dis = dis + (p->count[i]- standard.count[i]) * (p->count[i]- standard.count[i]);
-                tmp = tmp + standard.count[i]*standard.count[i];
+            //*
+            if (brand_sum>=4){
+                dis = tmp = 0;
+                for (i=0;i<4;i++){
+                    if (i==1) continue;
+                    dis = dis + (p->count[i]- standard.count[i]) * (p->count[i]- standard.count[i]);
+                    tmp = tmp + standard.count[i]*standard.count[i];
+                }
+                dis = sqrt(dis); tmp = sqrt(tmp);
+                if (dis<tmp * DIS_FACTOR){
+                    p->decide = 1;
+                    continue;
+                }
             }
-            dis = sqrt(dis); tmp = sqrt(tmp);
-            if (dis<tmp * DIS_FACTOR){
-                p->decide = 1;
-                continue;
+            if (p->scale.count[4]>100){
+                dis = tmp = 0;
+                for (i=0;i<4;i++){
+                    if (i==1) continue;
+                    dis = dis + (p->count[i]- p->scale.count[i]) * (p->count[i]- p->scale.count[i]);
+                    tmp = tmp + p->scale.count[i]*p->scale.count[i];
+                }
+                dis = sqrt(dis); tmp = sqrt(tmp);
+                if (dis<tmp * DIS_FACTOR){
+                    p->decide = 1;
+                    continue;
+                }
             }
-            dis = tmp = 0;
-            for (i=0;i<4;i++){
-                if (i==1) continue;
-                dis = dis + (p->count[i]- p->scale.count[i]) * (p->count[i]- p->scale.count[i]);
-                tmp = tmp + p->scale.count[i]*p->scale.count[i];
-            }
-            dis = sqrt(dis); tmp = sqrt(tmp);
-            if (dis<tmp * DIS_FACTOR){
-                p->decide = 1;
-                continue;
-            }
+            //*/
             p->decide = 0;
         }
     }
@@ -338,6 +350,7 @@ void define_new_id(){
         k = brand_hash[k%HASH].check(k,brand_num);
         brand[k].count[logg[i].action_type]++;
         brand[k].brand_id = logg[i].brand_id;
+        brand[k].sum++;
 
         k = logg[i].user_id;
         k = user_hash[k%HASH].check(k,user_num);
@@ -356,6 +369,8 @@ void scale(){
     double tmp;
     for (i=0;i<brand_num;i++){
         k = 0;
+        s.count[0] = s.count[1] = s.count[2] = s.count[3] = 0;
+        /*
         for (j=0;j<user_num;j++){
             t = user[j].brand_vector(brand[i].brand_id);
             if (t.count[1]>0){
@@ -366,8 +381,11 @@ void scale(){
                 s.count[3] = s.count[3] + t.count[3];
             }
         }
+        */
+        for (j=0;j<4;j++) s.count[j] = brand[i].count[j];
         tmp = s.count[1];
-        for (j=0;j<4;j++) s.count[j] = (double(s.count[j])) / tmp;
+        if (tmp!=0) for (j=0;j<4;j++) s.count[j] = (double(s.count[j])) / tmp;
+        s.count[4] = brand[i].sum;
         for (j=0;j<user_num;j++){
             user[j].insert_scale(brand[i].brand_id,s);
         }
@@ -382,19 +400,28 @@ void frequent(){
     int i,j,k,p,q,t,b,s;
     for (i=0;i<brand_num;i++){
         k = 0;
+        /*
         for (j=0;j<4;j++){
             k = k + brand[i].count[j];
         }
+        */
+        k = brand[i].count[1];
         if (k>AP_THRESHOLD_P1){
             items[items_num].insert(brand[i].brand_id,k);
             items_num++;
         }
     }
 
+    cout<<"total frequent item: "<<items_num<<endl;
+
     for (i=0;i<items_num;i++){
         for (j=i+1;j<items_num;j++){
             s = 0;
             for (k=0;k<user_num;k++){
+                if (user[k].check_bought(items[i].brand_id)&&user[k].check_bought(items[j].brand_id)){
+                    s++;
+                }
+                /*
                 t = 0;
                 for (p=0;p<user[k].brand_sum;p++){
                     b = user[k].info(p,-1);
@@ -404,6 +431,7 @@ void frequent(){
                 if (t == 2){
                     s++;
                 }
+                */
             }
             if (s>AP_THRESHOLD_P2){
                 pairs[pairs_num].insert(items[i].brand_id,items[j].brand_id,s);
@@ -453,7 +481,8 @@ void output_brand_count(){
         for (j=0;j<4;j++){
             k = k + brand[i].count[j];
         }
-        if (k<200) {
+        k = brand[i].count[1];
+        if (k<=10) {
             i++;
             continue;
         }
@@ -479,7 +508,7 @@ void output_user_count(){
         k = k + user[i].output_user();
         i++;
     }
-    cout<<k<<endl;
+    cout<<"total output: "<<k<<" predictions"<<endl;
     cin>>k;
 }
 
@@ -533,7 +562,7 @@ int main(){
     define_new_id();
     scale();
     first_decide();
-    //frequent();
+    frequent();
     //output_frequent_count();
     //output_brand_count();
     output_user_count();
